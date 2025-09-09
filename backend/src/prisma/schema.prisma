@@ -1,0 +1,83 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+model Atendimento {
+  id            Int         @id @default(autoincrement())
+  numero        String
+  clienteNome   String?     
+  atendenteId   Int?
+  status        AtendimentoStatus @default(NOVO)
+  canal         String       @default("whatsapp")
+  dataInicio    DateTime     @default(now())
+  dataFim       DateTime?
+  mensagens     Mensagem[]
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  @@index([numero, status])
+  @@index([atendenteId])
+}
+
+model Mensagem {
+  id            Int       @id @default(autoincrement())
+  atendimentoId Int
+  remetente     Remetente
+  tipo          TipoMensagem
+  conteudo      String?
+  midiaPath     String?
+  mimeType      String?
+  createdAt     DateTime  @default(now())
+  atendimento   Atendimento @relation(fields: [atendimentoId], references: [id], onDelete: Cascade)
+
+  @@index([atendimentoId, createdAt])
+}
+
+model OpcaoAtendimento {
+  id            Int    @id @default(autoincrement())
+  ordem         Int
+  titulo        String
+  atendenteId   Int
+  ativo         Boolean @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@unique([ordem, ativo])
+}
+
+model ConfiguracaoAtendimento {
+  id             Int    @id @default(autoincrement())
+  mensagemPadrao String
+  opcoes         Json
+  ativo          Boolean @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+}
+
+enum AtendimentoStatus {
+  NOVO
+  EM_ATENDIMENTO
+  FINALIZADO
+}
+
+enum Remetente {
+  CLIENTE
+  ATENDENTE
+  ROBO
+}
+
+enum TipoMensagem {
+  TEXT
+  IMAGE
+  AUDIO
+  DOCUMENT
+  STICKER
+  LOCATION
+  CONTACT
+  UNKNOWN
+}

@@ -1,0 +1,5 @@
+[33m93e9c4d[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmaster[m[33m)[m Initial commit: Upload complete VB Solution CRM project
+[33ma661faa[m[33m ([m[1;31morigin/master[m[33m, [m[1;31morigin/HEAD[m[33m)[m Resolvendo conflitos de merge e sincronizando alterações locais
+[33m7ef6d3d[m Initial commit: Adicionando arquivos principais do sistema
+[33ma9dbd2a[m 🚀 MAJOR UPDATE: Sistema completo com autenticação, login e WhatsApp funcional - Versão 3.0.0
+[33m387d7d4[m feat: implementar sistema de autenticação e otimizações de performance - Adicionar hook useUserName para extração inteligente de nomes - Implementar componente SupabaseDebug para debugging - Adicionar otimizações de performance e preload de dados - Criar migrações do Supabase para tabelas de autenticação - Corrigir sistema de exibição de nomes de usuário (Davi em vez de Usuário) - Implementar eventos de sincronização entre contextos - Otimizar redirecionamento após cadastro e login
