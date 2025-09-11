@@ -387,16 +387,22 @@ async function createWhatsAppConnection(connectionId, userId = '00000000-0000-00
         const messages = m.messages || [];
         console.log(`📨 Recebidas ${messages.length} mensagens para ${connectionId}`);
         
+        // Obter informações do WhatsApp conectado
+        const whatsappInfo = sock.user;
+        const connectionPhone = whatsappInfo?.id?.split(':')[0] || null;
+        
         for (const message of messages) {
           // Normalizar mensagem usando o message-normalizer
           const messageData = mapToDbRow(message, null, connectionId, '00000000-0000-0000-0000-000000000000');
           
-          // Criar ID de atendimento como UUID válido (opcional, pode ser null)
-          const atendimentoId = messageData.chat_id ? 
-            `00000000-0000-0000-0000-${messageData.chat_id.replace('@s.whatsapp.net', '').padStart(12, '0')}` : 
-            null;
+          // Adicionar informações da conexão
+          messageData.connection_id = connectionId; // ID real da conexão
+          messageData.connection_phone = connectionPhone;
+          messageData.phone_number = messageData.chat_id ? messageData.chat_id.split('@')[0] : null;
           
-          messageData.atendimento_id = atendimentoId;
+          // Gerar Atendimento ID único para a conversa (UUID válido)
+          const { v4: uuidv4 } = require('uuid');
+          messageData.atendimento_id = uuidv4();
           
           // Determinar status baseado no remetente
           if (messageData.remetente === 'CLIENTE') {
@@ -412,7 +418,7 @@ async function createWhatsAppConnection(connectionId, userId = '00000000-0000-00
             if (isMediaTipo(messageData.message_type)) {
               const keyPrefix = [
                 messageData.owner_id,
-                messageData.atendimento_id,
+                messageData.connection_id,
                 messageData.message_id || `msg_${Date.now()}`
               ].join('/');
 
@@ -431,17 +437,27 @@ async function createWhatsAppConnection(connectionId, userId = '00000000-0000-00
           }
           
           // Salvar mensagem no banco
+          console.log('💾 Salvando mensagem no Supabase:', {
+            connection_id: messageData.connection_id,
+            chat_id: messageData.chat_id,
+            atendimento_id: messageData.atendimento_id,
+            conteudo: messageData.conteudo,
+            remetente: messageData.remetente
+          });
+          
           const { error: insertError } = await supabase
             .from('whatsapp_mensagens')
             .insert(messageData);
           
           if (insertError) {
-            console.error('Erro ao salvar mensagem:', insertError);
+            console.error('❌ Erro ao salvar mensagem:', insertError);
             continue;
+          } else {
+            console.log('✅ Mensagem salva com sucesso no Supabase');
           }
           
           // Emitir para o frontend
-          io.to(`${connectionId}-${atendimentoId}`).emit('newMessage', {
+          io.to(`${connectionId}-${messageData.chat_id}`).emit('newMessage', {
             ...messageData,
             id: messageData.message_id
           });
@@ -450,7 +466,7 @@ async function createWhatsAppConnection(connectionId, userId = '00000000-0000-00
           const preview = previewLabel(messageData.message_type, messageData.conteudo, messageData.duration_ms);
           io.to(connectionId).emit('conversation:updated', {
             connectionId,
-            conversationId: messageData.atendimento_id,
+            conversationId: messageData.chat_id,
             lastMessageAt: messageData.timestamp,
             preview,
             from: messageData.remetente // 'CLIENTE' or 'ATENDENTE'
@@ -786,7 +802,7 @@ app.post('/api/baileys-simple/connections/:connectionId/send-message', async (re
       owner_id: process.env.WA_OWNER_ID || '00000000-0000-0000-0000-000000000000',
       chat_id: chatId,
       conteudo: message,
-      tipo: type.toUpperCase(),
+      message_type: type.toUpperCase(),
       remetente: 'ATENDENTE',
       timestamp: new Date().toISOString(),
       message_id: `out_${Date.now()}`,
@@ -801,41 +817,16 @@ app.post('/api/baileys-simple/connections/:connectionId/send-message', async (re
       }
     };
     
+    // Gerar Atendimento ID único para a conversa (UUID válido)
+    const { v4: uuidv4 } = require('uuid');
+    messageData.atendimento_id = uuidv4();
+    
     // Se client enviou uma URL de mídia, persistir como media_url
     if (type !== 'text') {
       messageData.media_url = message; // é já uma URL
     }
     
-    // Ensure there is an atendimento for this chat on this connection
-    let atendimentoId = undefined;
-    {
-      const { data: atendimento, error: atdErr } = await supabase
-        .from('whatsapp_atendimentos')
-        .select('id')
-        .eq('chat_id', chatId)
-        .eq('status', 'ATIVO')
-        .single();
-      if (atdErr || !atendimento) {
-        const { data: newAtd, error: createErr } = await supabase
-          .from('whatsapp_atendimentos')
-          .insert({
-            chat_id: chatId,
-            status: 'ATIVO',
-            owner_id: messageData.owner_id,
-            connection_id: connectionId
-          })
-          .select('id')
-          .single();
-        if (createErr) {
-          console.error('Erro ao criar atendimento (outbound):', createErr);
-        } else {
-          atendimentoId = newAtd?.id;
-        }
-      } else {
-        atendimentoId = atendimento.id;
-      }
-    }
-    messageData.atendimento_id = atendimentoId || messageData.atendimento_id;
+    messageData.connection_id = connectionId;
 
     // Enviar via Baileys
     const result = await connection.sock.sendMessage(chatId, { text: message });
@@ -849,8 +840,8 @@ app.post('/api/baileys-simple/connections/:connectionId/send-message', async (re
       console.error('Erro ao salvar mensagem enviada:', insertError);
     } else {
       // Emit to the conversation room (center pane) as well
-      if (messageData.atendimento_id) {
-        io.to(`${connectionId}-${messageData.atendimento_id}`).emit('newMessage', {
+      if (messageData.chat_id) {
+        io.to(`${connectionId}-${messageData.chat_id}`).emit('newMessage', {
           ...messageData,
           id: messageData.message_id
         });
@@ -859,7 +850,7 @@ app.post('/api/baileys-simple/connections/:connectionId/send-message', async (re
       const preview = previewLabel(messageData.message_type, messageData.conteudo, messageData.duration_ms);
       io.to(connectionId).emit('conversation:updated', {
         connectionId,
-        conversationId: messageData.atendimento_id,
+        conversationId: messageData.chat_id,
         lastMessageAt: messageData.timestamp,
         preview,
         from: messageData.remetente // 'CLIENTE' or 'ATENDENTE'
@@ -887,7 +878,7 @@ app.post('/api/baileys-simple/atendimentos/:atendimentoId/read', async (req, res
     const { error } = await supabase
       .from('whatsapp_mensagens')
       .update({ lida: true })
-      .eq('atendimento_id', atendimentoId)
+      .eq('connection_id', connectionId)
       .eq('remetente', 'CLIENTE')
       .eq('lida', false);
 
